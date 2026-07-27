@@ -1,0 +1,381 @@
+#!/usr/bin/bash
+
+HELP() {
+  cat <<'EOF'
+Usage: vrc-py_wrapper [-v]
+Usage: vrc-py_wrapper [switch] args
+
+An ENTRY is a line containing a message
+
+replace|--replace-messages MESSAGE MESSAGE ...
+  Replace all enabled message entries in config file with new entries.
+
+append|--append-messages MESSAGE MESSAGE ...
+  Append message entries to config.
+
+disable|--disable-entries [--delete] ENTRY ENTRY ...
+  Disable or delete message entries.
+
+--purge-entries
+  Purge disabled message entries.
+
+--print-config
+  Print config file.
+
+--print-enabled|--print-entries
+  Print enabled message entries.
+
+--print-disabled
+  Print disabled message entries.
+
+--init-config
+  Initializes a new config file with example uses.
+
+--verbose|-v
+  Prints current timeout and message.
+
+--help
+  Print this message.
+EOF
+}
+CONFIG_PATH="$HOME/.config/vrc-py"
+PROFILE_PATH="$CONFIG_PATH/profiles"
+CONFIG_FILE="$CONFIG_PATH/messages"
+timeout=30
+disabled_prefix=") -"
+
+
+init_config() {
+  # Usage: $0 init for new config,
+  # $0 for non-destructive config refresh
+
+  # This creates a new config if not present
+  if [ "$1" = "init" ] || ! [ -e "$CONFIG_FILE" ]; then 
+    # Init a new config
+    mkdir -p "$PROFILE_PATH"
+    cat <<'EOF' "$CONFIG_FILE"
+message=This is a wrapper.
+message="Some quote" - Some Person
+message=Don't be mean >^\\\^<
+EOF
+  return
+  fi
+  mkdir -p "$PROFILE_PATH"
+  tee <<<"" "$CONFIG_FILE"
+}
+
+
+update_messages() { 
+  # Updates messages variable
+
+  eval "messages=($(
+    awk '
+    {
+      if (match($0,/^[^#]*message=(.*)$/, message)) {
+        $0 = message[1]
+        # Escape single quotes
+        gsub(/'\''/,"'\'\\\\\'\''")
+        # Extract message
+        printf "'\''%s'\''\n", $0
+      }
+    }
+    ' "$CONFIG_FILE"
+  ))"
+}
+
+order_messages() {
+  newCONFIG="$(
+    awk '
+    {
+      if (/^[^#]*message=.*$/) {
+        print $0
+      }
+    }' "$CONFIG_FILE"
+  )"
+  newCONFIG="$(
+    awk '
+    {
+      if (/^[^#]*message=.*$/) {
+        next
+      } else {
+        print $0
+      }
+    }' "$CONFIG_FILE"
+  )"$'\n'"$newCONFIG"
+  cat <<<"$newCONFIG" >"$CONFIG_FILE"
+}
+
+print_numbered_entries() {
+  # Enabled and disabled deprecated due to ambiguity
+  case "$1" in 
+    all)
+      awk -v prefix="$disabled_prefix" '
+      /message=/ {
+        print NR prefix $0
+      }' "$CONFIG_FILE"
+      ;;
+    enabled)
+      awk -v prefix="$disabled_prefix" '
+      /^[^#]*message=.*$/ {
+        print NR prefix $0
+      }' "$CONFIG_FILE"
+      ;;
+    disabled)
+      awk -v prefix="$disabled_prefix" '
+      /^[#[:space:]]+message=.*$/ {
+        print NR prefix $0
+      }' "$CONFIG_FILE"
+      ;;
+  esac
+}
+
+convert_entry_numbers_to_entries() {
+  local config
+  config="$(print_numbered_entries all)"
+  mapfile messages <<<"$(
+    for entry in "${entries[@]}"; do
+      awk -v regex="/.*$entry.*message=(.*)$" '
+      {
+        if (match($0,regex, message)) {
+          print message[1]
+        }
+      }' <<<"$config"
+    done
+  )"
+}
+
+replace_messages() {
+  # preserve-disabled: Preserve disabled entries
+  # preserve-enabled: Preserve enabled entries
+  # preserve-all: Preserve all entries
+  # enable-all: Preserve and enable all entries
+  # disable-all: Preserve but disable all entries
+  # enable: Enable provided entries
+  # disable: Disable provided entries
+  case "$1" in 
+    preserve-disabled)
+      newCONFIG="$(
+        awk '
+        if (/^[^#]+message=.*$/) {
+          next
+        } else {
+          print $0
+        }' "$CONFIG_FILE"
+      )"
+      ;;
+    preserve-enabled)
+      newCONFIG="$(
+        awk '
+        if (/^[#]+message=.*$/) {
+          next
+        } else {
+          print $0
+        }' "$CONFIG_FILE"
+      )"
+      ;;
+    preserve-all)
+      newCONFIG="$(
+        cat "$CONFIG_FILE"
+      )"
+      ;;
+    delete-all)
+      newCONFIG=""
+      ;;
+    enable-all)
+      newCONFIG="$(
+        awk '
+        {
+          if (/^[#[:space:]]*message=.*$/) {
+            match($0,/^(.*)message=.*$/,a)
+            sub($0,a[1], "")
+          }
+          print $0
+        }
+        ' "$CONFIG_FILE"
+      )"
+      echo "$newCONFIG"
+      ;;
+    disable-all)
+      newCONFIG="$(
+        awk '
+        {
+          if (/^[^#]*message=.*$/) {
+            print "# " $0
+          } else {
+            print $0
+          }
+        }' "$CONFIG_FILE"
+      )"
+      ;;
+    disable)
+      newCONFIG="$(cat "$CONFIG_FILE")"
+      for message in "${messages[@]}"; do
+        newCONFIG="$(
+          awk -v target="$message" '
+          {
+            sub(target,"", $0)
+            if ($0 != "") {
+              print $0
+            }
+          }' <<<"$newCONFIG"
+        )"
+      done
+      newCONFIG="$(printf '# message=%s\n' "${messages[@]}")"$'\n'"$newCONFIG"
+      unset messages
+      ;;
+    enable)
+      newCONFIG="$(cat "$CONFIG_FILE")"
+      for message in "${messages[@]}"; do
+        newCONFIG="$(
+          awk -v target="$message" '
+          {
+            match(target,/^(.*)message=.*$/)
+            sub(target,substr(target,RSTART + RLENGTH), $0)
+            print $0
+          }' <<<"$newCONFIG"
+        )"
+      done
+      messages=("$(printf '\n%s' "$newCONFIG")")
+      unset newCONFIG
+      ;;
+  esac
+
+  # Construct final config
+  newCONFIG="$newCONFIG""$(
+    if [ -n "${messages[*]}" ]; then
+      printf '\nmessage=%s' "${messages[@]}"
+    fi
+  )"
+  if [ -z "$newCONFIG" ]; then
+    HELP
+    exit 1
+  fi
+
+  cat <<< "$newCONFIG" >"$CONFIG_FILE"
+  print_numbered_entries all
+}
+
+main() {
+  trap 'kill "$PROC_PID" && unset PROC_PID' SIGINT SIGTERM SIGHUP
+  messages=()
+  coproc PROC { vrc-py; }
+  exec {VRCFD}>&"${PROC[1]}"
+  KILL_PROC() {
+    if [ -n "$PROC_PID" ]; then
+      kill "$PROC_PID"
+    fi
+    exec {VRCFD}>&-
+    unset PROC PROC_PID
+  }
+  update_messages
+  if [ -z "${messages[*]}" ]; then
+    echo "No messages in config."
+    KILL_PROC
+    exit 1
+  fi
+  printf "\`%s'\n" "${messages[@]}"
+  while [ -n "$PROC_PID" ]; do 
+    oldMessages=("${messages[@]}")
+    update_messages
+    
+    if [ -v "VRC_PY_WRAPPER_DEBUG" ]; then
+      [ "${oldMessages[*]}" = "${messages[*]}" ] || printf "\n\`%s'\n" "${messages[@]}"
+    fi
+
+    for message in "${messages[@]}"; do
+      if [ -z "$PROC_PID" ]; then
+        KILL_PROC
+        printf '\n'
+        break
+      fi
+      printf '%s\n' "$message" >&"$VRCFD"
+      
+      # Timeout
+      for time in $(seq 1 "$timeout"); do
+        if [ -v "VRC_PY_WRAPPER_DEBUG" ]; then
+          printf '\033[2k\r%s' "Message \`${message}': Sleeping ${time}/${timeout}"
+        fi
+        sleep 1
+        if [ -z "$PROC_PID" ]; then
+          break
+        fi
+      done
+    done
+  done
+}
+
+order_messages
+args=("$0" "$@")
+parse_args() {
+  case "${args[1]}" in
+    "")
+      main
+      ;;
+    --verbose|-v)
+      VRC_PY_WRAPPER_DEBUG=1
+      args=("$0" "${args[@]:2}")
+      parse_args
+      ;;
+    --disable-entries|disable)
+      if grep -E "all|a" <<<"${args[2]}"; then
+        replace_messages disable-all
+      else
+        entries=("${args[@]:2}")
+        convert_entry_numbers_to_entries 
+        replace_messages disable
+      fi
+      ;;
+    --enable-entries|enable)
+      if grep -E "all|a" <<<"${args[2]}"; then
+        replace_messages enable-all
+      else
+        messages=("${args[@]:2}")
+        convert_entry_numbers_to_entries
+        replace_messages enable
+      fi
+      ;;
+    --replace-messages|replace)
+      if [ "${args[2]}" = "--delete" ]; then
+        messages=("${args[@]:3}")
+        replace_messages delete-enabled
+      else
+        messages=("${args[@]:2}")
+        replace_messages disable-all
+      fi
+      ;;
+    --append-messages|append)
+      # Add message(s) to config
+      messages=("${args[@]:2}")
+      replace_messages preserve-all
+      ;;
+    --init-config)
+      # Initialize config with example uses
+      init_config init
+      ;;
+    --clear-config|clear)
+      replace_messages delete-all
+      ;;
+    --print-config|print)
+      # Print configuration file
+      print_numbered_entries all
+      ;;
+    --print-enabled|--print-entries)
+      print_numbered_entries enabled
+      ;;
+    --print-disabled)
+      print_numbered_entries disabled
+      ;;
+    --help)
+      # Print help message
+      HELP
+      exit
+      ;;
+    *)
+      printf 'Unsopported option: %s\n' "${args[1]}" 
+      HELP
+      exit 1
+      ;;
+  esac
+}
+parse_args
+printf '\r%s' "n>^~^<n"
