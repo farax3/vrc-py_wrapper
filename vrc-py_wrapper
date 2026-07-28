@@ -2,8 +2,7 @@
 
 HELP() {
   cat <<'EOF'
-Usage: vrc-py_wrapper [-v]
-Usage: vrc-py_wrapper [switch] args
+Usage: vrc-py_wrapper [-v] [OPERATION args]
 
 An ENTRY is a line containing a message
 
