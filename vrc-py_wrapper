@@ -71,7 +71,7 @@ STOP_VRC_PY() {
 
 # Sorts args array in ascending order
 sort_entries() {
-  mapfile -t args < <(sort -nu < <(printf '%s\n' ${args[@]}))
+  mapfile -t args < <(sort -nu < <(printf '%s\n' "${args[@]}"))
 }
 
 # Errors if function is given one or less args
