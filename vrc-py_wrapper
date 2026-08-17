@@ -2,18 +2,25 @@
 
 HELP() {
   cat <<'EOF'
-Usage: vrc-py_wrapper [-v] [OPERATION args]
+Usage: vrc-py_wrapper [-v] [ OPERATION [SWITCH] args ]
 
-An ENTRY is a line containing a message
+A CLI for managing and cycling VRChat OSC chatbox messages.
 
-replace|--replace-messages MESSAGE MESSAGE ...
+replace MESSAGE MESSAGE ...
   Replace all enabled message entries in config file with new entries.
 
-append|--append-messages MESSAGE MESSAGE ...
+disable ENTRY ENTRY ...
+  Disable message entries.
+
+delete ENTRY ENTRY ...
+  Delete message entries.
+
+enable ENTRY ENTRY ...
+  Enable message entries.
+
+append MESSAGE MESSAGE ...
   Append message entries to config.
 
-disable|--disable-entries [--delete] ENTRY ENTRY ...
-  Disable or delete message entries.
 
 --purge-entries
   Purge disabled message entries.
@@ -41,49 +48,89 @@ CONFIG_PATH="$HOME/.config/vrc-py"
 PROFILE_PATH="$CONFIG_PATH/profiles"
 CONFIG_FILE="$CONFIG_PATH/messages"
 timeout=30
-disabled_prefix=") -"
+numbered_prefix=") -"
+trap 'kill "$PROC_PID" && unset PROC_PID' SIGINT SIGTERM SIGHUP
 
 
+######   Helpers   ######
+
+START_VRC_PY() {
+  coproc PROC { vrc-py; }
+  exec {VRCFD}>&"${PROC[1]}"
+}
+
+STOP_VRC_PY() {
+  if [ -n "$PROC_PID" ]; then
+    kill "$PROC_PID"
+    exec {VRCFD}>&-
+    unset PROC PROC_PID
+    return 0
+  fi
+  return 1
+}
+
+# Sorts args array in ascending order
+sort_entries() {
+  mapfile -t args < <(sort -nu < <(printf '%s\n' ${args[@]}))
+}
+
+# Errors if function is given one or less args
+check_messages_null() {
+  if [ -z "$(printf '%s\n' "${@:2}")" ]; then
+    tee <<< "No message(s) (entries) provided."
+    return 1
+  else
+    if [ -v "VRC_PY_WRAPPER_VERBOSE" ]; then
+      messages=("$@:2")
+      tee <<<"${message[*]}"
+    fi
+  fi
+}
+
+# Initialize config path and file
 init_config() {
-  # Usage: $0 init for new config,
-  # $0 for non-destructive config refresh
 
-  # This creates a new config if not present
+  # Create a new config if not present
   if [ "$1" = "init" ] || ! [ -e "$CONFIG_FILE" ]; then 
     # Init a new config
-    mkdir -p "$PROFILE_PATH"
-    cat <<'EOF' "$CONFIG_FILE"
+    local contents
+    contents="$(cat <<'EOF'
 message=This is a wrapper.
 message="Some quote" - Some Person
 message=Don't be mean >^\\\^<
 EOF
-  return
+)"
   fi
   mkdir -p "$PROFILE_PATH"
-  tee <<<"" "$CONFIG_FILE"
+  tee <<<"$contents" "$CONFIG_FILE"
 }
 
 
-update_messages() { 
-  # Updates messages variable
+######   MAIN   ######
 
-  eval "messages=($(
-    awk '
-    {
-      if (match($0,/^[^#]*message=(.*)$/, message)) {
-        $0 = message[1]
-        # Escape single quotes
-        gsub(/'\''/,"'\'\\\\\'\''")
-        # Extract message
-        printf "'\''%s'\''\n", $0
-      }
-    }
-    ' "$CONFIG_FILE"
-  ))"
+# Prints messages from given config
+get_messages() {
+  declare config="$1"
+  sed -e "/^[[:space:]]*#/d;s/^.*=//" "$config"
+#  eval "messages=($(
+#    awk '
+#    {
+#      if (match($0,/^[^#]*message=(.*)$/, message)) {
+#        $0 = message[1]
+#        # Escape single quotes
+#        gsub(/'\''/,"'\'\\\\\'\''")
+#        # Extract message
+#        printf "'\''%s'\''\n", $0
+#      }
+#    }
+#    ' "$CONFIG_FILE"
+#  ))"
 }
 
 order_messages() {
-  newCONFIG="$(
+  local newCONFIG
+  local enabled disabled
+  enabled="$(
     awk '
     {
       if (/^[^#]*message=.*$/) {
@@ -91,7 +138,7 @@ order_messages() {
       }
     }' "$CONFIG_FILE"
   )"
-  newCONFIG="$(
+  disabled="$(
     awk '
     {
       if (/^[^#]*message=.*$/) {
@@ -100,27 +147,31 @@ order_messages() {
         print $0
       }
     }' "$CONFIG_FILE"
-  )"$'\n'"$newCONFIG"
-  cat <<<"$newCONFIG" >"$CONFIG_FILE"
+  )"
+  # Only insert new line when needed
+  if [ -n "$disabled" ] && [ -n "$enabled" ]; then
+    enabled="$enabled"$'\n'
+  fi
+  cat <<<"$enabled$disabled" >"$CONFIG_FILE"
 }
 
+# Print config with a line number prefix.
 print_numbered_entries() {
-  # Enabled and disabled deprecated due to ambiguity
   case "$1" in 
     all)
-      awk -v prefix="$disabled_prefix" '
+      awk -v prefix="$numbered_prefix" '
       /message=/ {
         print NR prefix $0
       }' "$CONFIG_FILE"
       ;;
     enabled)
-      awk -v prefix="$disabled_prefix" '
+      awk -v prefix="$numbered_prefix" '
       /^[^#]*message=.*$/ {
         print NR prefix $0
       }' "$CONFIG_FILE"
       ;;
     disabled)
-      awk -v prefix="$disabled_prefix" '
+      awk -v prefix="$numbered_prefix" '
       /^[#[:space:]]+message=.*$/ {
         print NR prefix $0
       }' "$CONFIG_FILE"
@@ -128,22 +179,8 @@ print_numbered_entries() {
   esac
 }
 
-convert_entry_numbers_to_entries() {
-  local config
-  config="$(print_numbered_entries all)"
-  mapfile messages <<<"$(
-    for entry in "${entries[@]}"; do
-      awk -v regex="/.*$entry.*message=(.*)$" '
-      {
-        if (match($0,regex, message)) {
-          print message[1]
-        }
-      }' <<<"$config"
-    done
-  )"
-}
-
-replace_messages() {
+edit_config () {
+  # Operates on the messagtes array and the config file.
   # preserve-disabled: Preserve disabled entries
   # preserve-enabled: Preserve enabled entries
   # preserve-all: Preserve all entries
@@ -151,25 +188,17 @@ replace_messages() {
   # disable-all: Preserve but disable all entries
   # enable: Enable provided entries
   # disable: Disable provided entries
+
+
   case "$1" in 
     preserve-disabled)
       newCONFIG="$(
-        awk '
-        if (/^[^#]+message=.*$/) {
-          next
-        } else {
-          print $0
-        }' "$CONFIG_FILE"
+        sed '/^[^#]*message=.*$/d' "$CONFIG_FILE"
       )"
       ;;
     preserve-enabled)
       newCONFIG="$(
-        awk '
-        if (/^[#]+message=.*$/) {
-          next
-        } else {
-          print $0
-        }' "$CONFIG_FILE"
+        sed '/^[[:space:]]*#[[:space:]]*message=.*$/d' "$CONFIG_FILE"
       )"
       ;;
     preserve-all)
@@ -178,112 +207,140 @@ replace_messages() {
       )"
       ;;
     delete-all)
-      newCONFIG=""
+      cat <<<"" > "$CONFIG_FILE"
+      return
+      ;;
+    delete)
+
+      sort_entries
+      newCONFIG="$(
+        cat "$CONFIG_FILE"
+      )"
+      local i=0
+      for entry in "${args[@]}"; do
+        newCONFIG="$(
+          sed "$((entry - i))d" <<< "$newCONFIG"
+        )"
+        ((i++))
+      done
+      args=()
       ;;
     enable-all)
       newCONFIG="$(
-        awk '
-        {
-          if (/^[#[:space:]]*message=.*$/) {
-            match($0,/^(.*)message=.*$/,a)
-            sub($0,a[1], "")
-          }
-          print $0
-        }
-        ' "$CONFIG_FILE"
+        sed 's/^.*#.*\(message=.*\)$/\1/' "$CONFIG_FILE"
       )"
-      echo "$newCONFIG"
       ;;
     disable-all)
       newCONFIG="$(
-        awk '
-        {
-          if (/^[^#]*message=.*$/) {
-            print "# " $0
-          } else {
-            print $0
-          }
-        }' "$CONFIG_FILE"
+        sed 's/^[^#]*\(message=.*\)$/# \1/' "$CONFIG_FILE"
       )"
       ;;
     disable)
-      newCONFIG="$(cat "$CONFIG_FILE")"
-      for message in "${messages[@]}"; do
-        newCONFIG="$(
+      # Here $args is an array of entry numbers
+
+      sort_entries
+      newCONFIG="$(
+        cat "$CONFIG_FILE"
+      )"
+      # Store enabled messages prior to removal
+      mapfile -t enabledMessages < <(
+        for message in "${args[@]}"; do
+          #sed "$( IFS=$'\n' sed "${message}d;s/^\(.*\)$/\1d;/g" <<< "{1..$(wc -l "$CONFIG_FILE")}" )" "$CONFIG_FILE"
           awk -v target="$message" '
           {
-            sub(target,"", $0)
-            if ($0 != "") {
-              print $0
+            if (NR == target && match($0,/^[^#]*message=(.*)$/,message)) {
+              // Enabled target
+              print message[1]
+              exit
+            } else {
+              next
             }
           }' <<<"$newCONFIG"
-        )"
+        done
+      )
+      # Remove messages
+      local i
+      for ((i=0;i<${#args[@]};i++)); do
+        newCONFIG="$(IFS=$'\n' sed "$((${args[$((i+1))]} - i))d" <<< "$newCONFIG")"
       done
-      newCONFIG="$(printf '# message=%s\n' "${messages[@]}")"$'\n'"$newCONFIG"
-      unset messages
+      if [ -n "${enabledMessages[*]}" ]; then
+        # Concat messages
+        newCONFIG="$(printf '# message=%s\n' "${enabledMessages[@]}")"$'\n'"${newCONFIG}"
+      else 
+        return 1
+      fi
+      args=()
       ;;
     enable)
+      # Here $messages is an array of entry numbers
+
+      sort_entries
       newCONFIG="$(cat "$CONFIG_FILE")"
-      for message in "${messages[@]}"; do
-        newCONFIG="$(
+      # Store messages prior to removal
+      mapfile -t disabledMessages < <(
+        for message in "${args[@]}"; do
           awk -v target="$message" '
           {
-            match(target,/^(.*)message=.*$/)
-            sub(target,substr(target,RSTART + RLENGTH), $0)
-            print $0
+            if (NR == target && match($0,/^.*#.*message=(.*)$/,message)) {
+              print message[1]
+              exit
+            } else {
+              next
+            }
           }' <<<"$newCONFIG"
-        )"
+        done
+        )
+      # Remove messages
+      local i=0
+      for message in "${args[@]}"; do
+        newCONFIG="$(IFS=$'\n' sed "$((message - i))d" <<< "$newCONFIG")"
+        ((i++))
       done
-      messages=("$(printf '\n%s' "$newCONFIG")")
-      unset newCONFIG
+      if [ -n "${disabledMessages[*]}" ]; then
+        # Concat messages
+        newCONFIG="${newCONFIG}$(printf '\nmessage=%s' "${disabledMessages[@]}")"
+      else 
+        return 1
+      fi
+      args=()
+      ;;
+    *)
+      tee <<< "Function: edit_config : Invalid action \`$1'"
+      exit 1
       ;;
   esac
 
   # Construct final config
   newCONFIG="$newCONFIG""$(
-    if [ -n "${messages[*]}" ]; then
-      printf '\nmessage=%s' "${messages[@]}"
+    if [ -n "${args[*]}" ]; then
+      printf '\nmessage=%s' "${args[@]}"
     fi
   )"
-  if [ -z "$newCONFIG" ]; then
-    HELP
-    exit 1
-  fi
 
   cat <<< "$newCONFIG" >"$CONFIG_FILE"
   print_numbered_entries all
 }
 
 main() {
-  trap 'kill "$PROC_PID" && unset PROC_PID' SIGINT SIGTERM SIGHUP
-  messages=()
-  coproc PROC { vrc-py; }
-  exec {VRCFD}>&"${PROC[1]}"
-  KILL_PROC() {
-    if [ -n "$PROC_PID" ]; then
-      kill "$PROC_PID"
-    fi
-    exec {VRCFD}>&-
-    unset PROC PROC_PID
-  }
-  update_messages
+  local oldMessages=() messages=()
+  mapfile -t messages < <(get_messages "$CONFIG_FILE")
   if [ -z "${messages[*]}" ]; then
     echo "No messages in config."
-    KILL_PROC
     exit 1
   fi
+  START_VRC_PY
   printf "\`%s'\n" "${messages[@]}"
   while [ -n "$PROC_PID" ]; do 
     oldMessages=("${messages[@]}")
-    update_messages
+    mapfile -t messages < <(get_messages "$CONFIG_FILE")
     
-    if [ -v "VRC_PY_WRAPPER_DEBUG" ]; then
+    if [ -v "VRC_PY_WRAPPER_VERBOSE" ]; then
       [ "${oldMessages[*]}" = "${messages[*]}" ] || printf "\n\`%s'\n" "${messages[@]}"
     fi
 
     for message in "${messages[@]}"; do
       if [ -z "$PROC_PID" ]; then
-        KILL_PROC
+        STOP_VRC_PY
         printf '\n'
         break
       fi
@@ -291,7 +348,7 @@ main() {
       
       # Timeout
       for time in $(seq 1 "$timeout"); do
-        if [ -v "VRC_PY_WRAPPER_DEBUG" ]; then
+        if [ -v "VRC_PY_WRAPPER_VERBOSE" ]; then
           printf '\033[2k\r%s' "Message \`${message}': Sleeping ${time}/${timeout}"
         fi
         sleep 1
@@ -310,55 +367,72 @@ parse_args() {
     "")
       main
       ;;
+
+    ### OPTIONS ###
+
     --verbose|-v)
-      VRC_PY_WRAPPER_DEBUG=1
+      VRC_PY_WRAPPER_VERBOSE=true
       args=("$0" "${args[@]:2}")
       parse_args
       ;;
-    --disable-entries|disable)
+    --prune|-p)
+      edit_config preserve-enabled
+      args=("$0" "${args[@]:2}")
+      parse_args
+      ;;
+    --disabled-prefix)
+      numbered_prefix="${args[2]}"
+      args=("$0" "${args[@]:3}")
+      parse_args
+      ;;
+
+    ### ACTION @@@
+
+    disable)
       if grep -E "all|a" <<<"${args[2]}"; then
-        replace_messages disable-all
+        edit_config disable-all
       else
-        entries=("${args[@]:2}")
-        convert_entry_numbers_to_entries 
-        replace_messages disable
+        args=("${args[@]:2}")
+        edit_config disable
       fi
       ;;
-    --enable-entries|enable)
+    delete)
+      args=("${args[@]:2}")
+      edit_config delete
+      ;;
+    enable)
       if grep -E "all|a" <<<"${args[2]}"; then
-        replace_messages enable-all
+        edit_config enable-all
       else
-        messages=("${args[@]:2}")
-        convert_entry_numbers_to_entries
-        replace_messages enable
+        args=("${args[@]:2}")
+        edit_config enable
       fi
       ;;
-    --replace-messages|replace)
+    replace)
       if [ "${args[2]}" = "--delete" ]; then
-        messages=("${args[@]:3}")
-        replace_messages delete-enabled
+        edit_config delete-enabled
       else
-        messages=("${args[@]:2}")
-        replace_messages disable-all
+        args=("${args[@]:2}")
+        edit_config disable-all
       fi
       ;;
-    --append-messages|append)
+    append)
       # Add message(s) to config
-      messages=("${args[@]:2}")
-      replace_messages preserve-all
+      args=("${args[@]:2}")
+      edit_config preserve-all
       ;;
-    --init-config)
+    init)
       # Initialize config with example uses
       init_config init
       ;;
-    --clear-config|clear)
-      replace_messages delete-all
+    clear)
+      edit_config delete-all
       ;;
-    --print-config|print)
+    print)
       # Print configuration file
       print_numbered_entries all
       ;;
-    --print-enabled|--print-entries)
+    --print-enabled)
       print_numbered_entries enabled
       ;;
     --print-disabled)

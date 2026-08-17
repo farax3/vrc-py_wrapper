@@ -1,20 +1,27 @@
-Wrapper for `vrc-py` AUR package.
+Wrapper for `vrc-py` AUR package with plans on becoming a standalone VRChat chatbox manager.
 
 CLI implementing a message queue with persistent storage.
 
 ```
-Usage: vrc-py_wrapper [-v] [OPERATION args]
+Usage: vrc-py_wrapper [-v] [ OPERATION [SWITCH] args ]
 
-An ENTRY is a line containing a message
+A CLI for managing and cycling VRChat OSC chatbox messages.
 
-replace|--replace-messages MESSAGE MESSAGE ...
+replace MESSAGE MESSAGE ...
   Replace all enabled message entries in config file with new entries.
 
-append|--append-messages MESSAGE MESSAGE ...
+disable ENTRY ENTRY ...
+  Disable message entries.
+
+delete ENTRY ENTRY ...
+  Delete message entries.
+
+enable ENTRY ENTRY ...
+  Enable message entries.
+
+append MESSAGE MESSAGE ...
   Append message entries to config.
 
-disable|--disable-entries [--delete] ENTRY ENTRY ...
-  Disable or delete message entries.
 
 --purge-entries
   Purge disabled message entries.
