@@ -2,43 +2,43 @@
 
 HELP() {
   cat <<'EOF'
-Usage: vrc-py_wrapper [-v] [ OPERATION [SWITCH] args ]
+Usage: vrc-py_wrapper [-v] [-vv|--verbose] [-p|--prune] [ OPERATION [SWITCH] args ]
 
 A CLI for managing and cycling VRChat OSC chatbox messages.
 
 replace MESSAGE MESSAGE ...
-  Replace all enabled message entries in config file with new entries.
+  Disable all enabled message entries with new entries.
 
-disable ENTRY ENTRY ...
+disable (a|all) | ENTRY ENTRY ...
   Disable message entries.
 
-delete ENTRY ENTRY ...
+delete (a|all) | (disabled|enabled) | ENTRY ENTRY ...
   Delete message entries.
 
-enable ENTRY ENTRY ...
+enable (a|all) | ENTRY ENTRY ...
   Enable message entries.
 
 append MESSAGE MESSAGE ...
   Append message entries to config.
 
+print [enabled|disabled]
+  Print message entries.
 
---purge-entries
+clear
+  Wipe config
+
+init
+  Initialize a new config file with example uses.
+
+
+-p|--purge
   Purge disabled message entries.
 
---print-config
-  Print config file.
+-v
+  Print message changes to stdout
 
---print-enabled|--print-entries
-  Print enabled message entries.
-
---print-disabled
-  Print disabled message entries.
-
---init-config
-  Initializes a new config file with example uses.
-
---verbose|-v
-  Prints current timeout and message.
+-vv|--verbose
+  Print current timeout and message changes.
 
 --help
   Print this message.
@@ -53,6 +53,16 @@ trap 'kill "$PROC_PID" && unset PROC_PID' SIGINT SIGTERM SIGHUP
 
 
 ######   Helpers   ######
+
+parse_fail() {
+  if [ "${2:: 1}" = - ]; then
+    printf 'Unrecognised %s: %s\n' "${1}" "${2}"
+  else
+    printf 'Unrecognised %s: %s\n' "${1}" "${2}"
+  fi
+  printf "Try: vrc-py_wrapper --help"
+  exit 1
+}
 
 START_VRC_PY() {
   coproc PROC { vrc-py; }
@@ -72,19 +82,12 @@ STOP_VRC_PY() {
 # Sorts args array in ascending order
 sort_entries() {
   mapfile -t args < <(sort -nu < <(printf '%s\n' "${args[@]}"))
-}
+  # error if non-int is given
+#  mapfile -t entries <(sed -n '/^[0-9]*$/p' <<<"${args[@]}")
+#  if (( #entries < #args )); then
+#    parse_fail entry 
+#  fi
 
-# Errors if function is given one or less args
-check_messages_null() {
-  if [ -z "$(printf '%s\n' "${@:2}")" ]; then
-    tee <<< "No message(s) (entries) provided."
-    return 1
-  else
-    if [ -v "VRC_PY_WRAPPER_VERBOSE" ]; then
-      messages=("$@:2")
-      tee <<<"${message[*]}"
-    fi
-  fi
 }
 
 # Initialize config path and file
@@ -97,7 +100,7 @@ init_config() {
     contents="$(cat <<'EOF'
 message=This is a wrapper.
 message="Some quote" - Some Person
-message=Don't be mean >^\\\^<
+message=https://github.com/farax3/vrc-py_wrapper
 EOF
 )"
   fi
@@ -110,7 +113,7 @@ EOF
 
 # Prints messages from given config
 get_messages() {
-  declare config="$1"
+  local config="$1"
   sed -e "/^[[:space:]]*#/d;s/^.*=//" "$config"
 #  eval "messages=($(
 #    awk '
@@ -189,6 +192,10 @@ edit_config () {
   # enable: Enable provided entries
   # disable: Disable provided entries
 
+  local rootArgs=("${args[@]}")
+  local args
+  args=("${rootArgs[@]}")
+  unset rootArgs
 
   case "$1" in 
     preserve-disabled)
@@ -211,7 +218,6 @@ edit_config () {
       return
       ;;
     delete)
-
       sort_entries
       newCONFIG="$(
         cat "$CONFIG_FILE"
@@ -348,8 +354,9 @@ main() {
       
       # Timeout
       for time in $(seq 1 "$timeout"); do
-        if [ -v "VRC_PY_WRAPPER_VERBOSE" ]; then
-          printf '\033[2k\r%s' "Message \`${message}': Sleeping ${time}/${timeout}"
+        if [ "$VRC_PY_WRAPPER_VERBOSE" -gt -1 ] 2>/dev/null; then
+          printf '\033[k' >&2
+          printf '\r\033[1k%s' "Message \`${message}': Sleeping ${time}/${timeout}"
         fi
         sleep 1
         if [ -z "$PROC_PID" ]; then
@@ -370,14 +377,26 @@ parse_args() {
 
     ### OPTIONS ###
 
-    --verbose|-v)
-      VRC_PY_WRAPPER_VERBOSE=true
+    --verbose|-vv)
+      declare -i VRC_PY_WRAPPER_VERBOSE=0
+      args=("$0" "${args[@]:2}")
+      parse_args
+      ;;
+    -t)
+      timeout="${args[2]}"
+      args=("$0" "${args[@]:3}")
+      parse_args
+      ;;
+    -v)
+      declare -i VRC_PY_WRAPPER_VERBOSE=-1
       args=("$0" "${args[@]:2}")
       parse_args
       ;;
     --prune|-p)
-      edit_config preserve-enabled
-      args=("$0" "${args[@]:2}")
+      local tmp=("${args[@]}")
+      args=()
+      edit_config preserve-enabled >/dev/null
+      args=("$0" "${tmp[@]:2}")
       parse_args
       ;;
     --disabled-prefix)
@@ -389,7 +408,8 @@ parse_args() {
     ### ACTION @@@
 
     disable)
-      if grep -E "all|a" <<<"${args[2]}"; then
+      if grep -E "^(all|a)$" <<<"${args[2]}"; then
+        args=("${args[@]:3}")
         edit_config disable-all
       else
         args=("${args[@]:2}")
@@ -397,11 +417,28 @@ parse_args() {
       fi
       ;;
     delete)
-      args=("${args[@]:2}")
-      edit_config delete
+      case "${args[2]}" in
+        disabled)
+          args=("${args[@]:3}")
+          edit_config preserve-enabled
+          ;;
+        enabled)
+          args=("${args[@]:3}")
+          edit_config preserve-disabled
+          ;;
+        0) parse_fail entry "${args[2]}" ;;
+        [0-9]*)
+          args=("${args[@]:2}")
+          edit_config delete
+          ;;
+        *)
+          parse_fail switch "${args[2]}"
+          ;;
+      esac
       ;;
     enable)
-      if grep -E "all|a" <<<"${args[2]}"; then
+      if grep -E "^(all|a)$" <<<"${args[2]}"; then
+        args=("${args[@]:3}")
         edit_config enable-all
       else
         args=("${args[@]:2}")
@@ -409,12 +446,16 @@ parse_args() {
       fi
       ;;
     replace)
-      if [ "${args[2]}" = "--delete" ]; then
-        edit_config delete-enabled
-      else
-        args=("${args[@]:2}")
-        edit_config disable-all
+      if [ "${args[2]}" = --purge ]; then
+        # Purge enabled
+        local tmpargs=("${args[@]}")
+        args=()
+        edit_config preserve-disabled >/dev/null
+        args=("${tmpargs[@]:1}") # Clip off first index to make next assignment first positional
       fi
+      # Append new
+      args=("${args[@]:2}")
+      edit_config disable-all
       ;;
     append)
       # Add message(s) to config
@@ -429,14 +470,20 @@ parse_args() {
       edit_config delete-all
       ;;
     print)
-      # Print configuration file
-      print_numbered_entries all
-      ;;
-    --print-enabled)
-      print_numbered_entries enabled
-      ;;
-    --print-disabled)
-      print_numbered_entries disabled
+      case "${args[2]}" in
+        disabled)
+          print_numbered_entries disabled
+          ;;
+        enabled)
+          print_numbered_entries enabled
+          ;;
+        "")
+          print_numbered_entries all
+          ;;
+        *)
+          parse_fail switch "${args[2]}"
+          ;;
+      esac
       ;;
     --help)
       # Print help message
@@ -444,11 +491,9 @@ parse_args() {
       exit
       ;;
     *)
-      printf 'Unsopported option: %s\n' "${args[1]}" 
-      HELP
-      exit 1
+      parse_fail subcommand "${args[1]}"
       ;;
   esac
 }
 parse_args
-printf '\r%s' "n>^~^<n"
+printf '\r%s' "n>^~^<n" >&2

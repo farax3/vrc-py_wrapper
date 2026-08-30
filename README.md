@@ -3,43 +3,43 @@ Wrapper for `vrc-py` AUR package with plans on becoming a standalone VRChat chat
 CLI implementing a message queue with persistent storage.
 
 ```
-Usage: vrc-py_wrapper [-v] [ OPERATION [SWITCH] args ]
+Usage: vrc-py_wrapper [-v] [-vv|--verbose] [-p|--prune] [ OPERATION [SWITCH] args ]
 
 A CLI for managing and cycling VRChat OSC chatbox messages.
 
 replace MESSAGE MESSAGE ...
-  Replace all enabled message entries in config file with new entries.
+  Disable all enabled message entries with new entries.
 
-disable ENTRY ENTRY ...
+disable (a|all) | ENTRY ENTRY ...
   Disable message entries.
 
-delete ENTRY ENTRY ...
+delete (a|all) | (disabled|enabled) | ENTRY ENTRY ...
   Delete message entries.
 
-enable ENTRY ENTRY ...
+enable (a|all) | ENTRY ENTRY ...
   Enable message entries.
 
 append MESSAGE MESSAGE ...
   Append message entries to config.
 
+print [enabled|disabled]
+  Print message entries.
 
---purge-entries
+clear
+  Wipe config
+
+init
+  Initialize a new config file with example uses.
+
+
+-p|--purge
   Purge disabled message entries.
 
---print-config
-  Print config file.
+-v
+  Print message changes to stdout
 
---print-enabled|--print-entries
-  Print enabled message entries.
-
---print-disabled
-  Print disabled message entries.
-
---init-config
-  Initializes a new config file with example uses.
-
---verbose|-v
-  Prints current timeout and message.
+-vv|--verbose
+  Print current timeout and message changes.
 
 --help
   Print this message.
