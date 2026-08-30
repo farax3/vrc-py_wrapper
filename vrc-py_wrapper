@@ -6,8 +6,8 @@ Usage: vrc-py_wrapper [-v] [-vv|--verbose] [-p|--prune] [ OPERATION [SWITCH] arg
 
 A CLI for managing and cycling VRChat OSC chatbox messages.
 
-replace MESSAGE MESSAGE ...
-  Disable all enabled message entries with new entries.
+replace [--purge] MESSAGE MESSAGE ...
+  Disable (or delete) all enabled message entries with new entries.
 
 disable (a|all) | ENTRY ENTRY ...
   Disable message entries.
