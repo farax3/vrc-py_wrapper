@@ -5,7 +5,7 @@ CLI implementing a message queue with persistent storage.
 ```
 Usage: vrc-py_wrapper [-v] [-vv|--verbose] [-p|--prune] [ OPERATION [SWITCH] args ]
 
-A CLI for managing and cycling VRChat OSC chatbox messages.
+A CLI for managing and cycling VRChat OSC chat box messages.
 
 replace [--purge] MESSAGE MESSAGE ...
   Disable (or delete) all enabled message entries with new entries.
