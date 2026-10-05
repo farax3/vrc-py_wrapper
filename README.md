@@ -7,28 +7,28 @@ Usage: vrc-py_wrapper [-v] [-vv|--verbose] [-p|--prune] [ OPERATION [SWITCH] arg
 
 A CLI for managing and cycling VRChat OSC chat box messages.
 
-replace [--purge] MESSAGE MESSAGE ...
+r[eplace] [--purge] MESSAGE MESSAGE ...
   Disable (or delete) all enabled message entries with new entries.
 
-disable (a|all) | ENTRY ENTRY ...
+d[isable] (a|all) | ENTRY ENTRY ...
   Disable message entries.
 
-delete (a|all) | (disabled|enabled) | ENTRY ENTRY ...
+de[lete] (a|all) | (disabled|enabled) | ENTRY ENTRY ...
   Delete message entries.
 
-enable (a|all) | ENTRY ENTRY ...
+e[nable] (a|all) | ENTRY ENTRY ...
   Enable message entries.
 
-append MESSAGE MESSAGE ...
+a[ppend] MESSAGE MESSAGE ...
   Append message entries to config.
 
-print [enabled|disabled]
+p[rint] [enabled|disabled]
   Print message entries.
 
-clear
+c[lear]
   Wipe config
 
-init
+i[nit]
   Initialize a new config file with example uses.
 
 
@@ -41,7 +41,7 @@ init
 -vv|--verbose
   Print current timeout and message changes.
 
---help
+h|-h|--help
   Print this message.
 
 ```

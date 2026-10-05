@@ -6,28 +6,28 @@ Usage: vrc-py_wrapper [-v] [-vv|--verbose] [-p|--prune] [ OPERATION [SWITCH] arg
 
 A CLI for managing and cycling VRChat OSC chat box messages.
 
-replace [--purge] MESSAGE MESSAGE ...
+r[eplace] [--purge] MESSAGE MESSAGE ...
   Disable (or delete) all enabled message entries with new entries.
 
-disable (a|all) | ENTRY ENTRY ...
+d[isable] (a|all) | ENTRY ENTRY ...
   Disable message entries.
 
-delete (a|all) | (disabled|enabled) | ENTRY ENTRY ...
+de[lete] (a|all) | (disabled|enabled) | ENTRY ENTRY ...
   Delete message entries.
 
-enable (a|all) | ENTRY ENTRY ...
+e[nable] (a|all) | ENTRY ENTRY ...
   Enable message entries.
 
-append MESSAGE MESSAGE ...
+a[ppend] MESSAGE MESSAGE ...
   Append message entries to config.
 
-print [enabled|disabled]
+p[rint] [enabled|disabled]
   Print message entries.
 
-clear
+c[lear]
   Wipe config
 
-init
+i[nit]
   Initialize a new config file with example uses.
 
 
@@ -40,7 +40,7 @@ init
 -vv|--verbose
   Print current timeout and message changes.
 
---help
+h|-h|--help
   Print this message.
 EOF
 }
@@ -401,7 +401,7 @@ parse_args()
 
     ### ACTION @@@
 
-    disable)
+    d|disable)
       if grep -E "^(all|a)$" <<<"${args[2]}"; then
         edit_config disable-all "${args[@]:3}"
       else
@@ -430,14 +430,14 @@ parse_args()
           ;;
       esac
       ;;
-    enable)
+    e|enable)
       if grep -E "^(all|a)$" <<<"${args[2]}"; then
         edit_config enable-all "${args[@]:3}"
       else
         edit_config enable "${args[@]:2}"
       fi
       ;;
-    replace)
+    r|replace)
       if [ "${args[2]}" = --purge ]; then
         # Purge enabled
         edit_config remove-enabled "${args[@:3]}" >/dev/null
@@ -446,15 +446,15 @@ parse_args()
         edit_config disable-all "${args[@]:2}"
       fi
       ;;
-    append)
+    a|append)
       # Add message(s) to config
       edit_config append "${args[@]:2}"
       ;;
-    init)
+    i|init)
       # Initialize config with example uses
       init_config init "$CONFIG_FILE"
       ;;
-    print)
+    p|print)
       case "${args[2]}" in
         disabled)
           print_numbered_entries disabled
@@ -470,7 +470,7 @@ parse_args()
           ;;
       esac
       ;;
-    --help)
+    h|-h|--help)
       # Print help message
       HELP
       exit
