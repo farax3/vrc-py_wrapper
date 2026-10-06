@@ -88,6 +88,9 @@ sort_entries()
   sort -nu < <(printf '%s\n' "${@}")
 }
 
+
+######   MAIN   ######
+
 # Initialize config path and file
 init_config()
 {
@@ -105,9 +108,6 @@ EOF
   mkdir -p "$PROFILE_PATH"
   tee <<<"$contents" "$CONFIG_FILE"
 }
-
-
-######   MAIN   ######
 
 # Prints messages from given config
 get_messages()
@@ -408,7 +408,7 @@ parse_args()
         edit_config disable "${args[@]:2}"
       fi
       ;;
-    delete)
+    de|delete)
       case "${args[2]}" in
         disabled)
           edit_config remove-disabled "${args[@]:3}"
